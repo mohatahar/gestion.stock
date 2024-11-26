@@ -18,20 +18,16 @@ function startInventoryCampaign($name, $userId) {
 function recordInventoryItem($campaignId, $productId, $actualQuantity, $userId, $comment = '') {
     global $pdo;
     try {
-        // Validate campaign and product exist
-        $stmt = $pdo->prepare("SELECT 1 FROM inventory_campaigns WHERE id = ?");
-        $stmt->execute([$campaignId]);
-        if (!$stmt->fetch()) {
-            throw new Exception("Invalid campaign");
+        // Validation du produit
+        $stmt = $pdo->prepare("SELECT quantity FROM produits WHERE id = :product_id");
+        $stmt->execute([':product_id' => $productId]);
+        $theoreticalQuantity = $stmt->fetchColumn();
+
+        if ($theoreticalQuantity === false) {
+            throw new Exception("Produit invalide");
         }
 
-        $stmt = $pdo->prepare("SELECT 1 FROM produits WHERE id = ?");
-        $stmt->execute([$productId]);
-        if (!$stmt->fetch()) {
-            throw new Exception("Invalid product");
-        }
-
-        // Existing insert logic with campaign_id added
+        // Insertion de l'enregistrement d'inventaire
         $stmt = $pdo->prepare("
             INSERT INTO inventory_records
             (campaign_id, product_id, theoretical_quantity, actual_quantity, 
@@ -39,9 +35,9 @@ function recordInventoryItem($campaignId, $productId, $actualQuantity, $userId, 
             VALUES (
                 :campaign_id,
                 :product_id,
-                (SELECT quantity FROM produits WHERE id = :product_id),
+                :theoretical_quantity,
                 :actual_quantity,
-                :actual_quantity - (SELECT quantity FROM produits WHERE id = :product_id),
+                :difference,
                 :user_id,
                 NOW(),
                 'pending',
@@ -49,16 +45,23 @@ function recordInventoryItem($campaignId, $productId, $actualQuantity, $userId, 
             )
         ");
 
+        $difference = $actualQuantity - $theoreticalQuantity;
+
         $stmt->execute([
             ':campaign_id' => $campaignId,
             ':product_id' => $productId,
+            ':theoretical_quantity' => $theoreticalQuantity,
             ':actual_quantity' => $actualQuantity,
+            ':difference' => $difference,
             ':user_id' => $userId,
             ':comment' => $comment
         ]);
+
     } catch (PDOException $e) {
         error_log("Inventory record error: " . $e->getMessage());
-        throw new Exception("Database error occurred");
+        error_log("SQL Error Code: " . $e->getCode());
+        error_log("SQL Error Info: " . print_r($stmt->errorInfo(), true));
+        throw new Exception("Database error occurred: " . $e->getMessage());
     }
 }
 
